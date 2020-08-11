@@ -1,0 +1,547 @@
+#!/usr/bin/env bash
+
+_warn() {
+	echo >&2 ":: $*"
+}
+
+_die() {
+	echo >&2 ":: $*"
+	exit 1
+}
+
+_check_positive() {
+	# check that $3, ..., $# are postive rational numbers and that the first $2 of them are not zero
+
+	errmsg="$1 is not a positive number"
+	no_nonzero="$2"
+	shift 2
+	[[ $no_nonzero =~ ^[0-9]+$ ]] || _die "_check_positive \$2=$2 wrong format"
+
+	while (("$#")); do
+		[[ -z $1 || ! $1 =~ ^\+?[0-9]*.?[0-9]*$ || ($no_nonzero -gt 0 &&  $1 = 0) ]] &&  _die "$errmsg"
+		((no_nonzero--))
+		shift
+	done
+}
+
+inform() {
+	# print help, version or config values
+
+	case "$1" in
+		''|'-h'|'--help'|'-help'|'-?')
+			cat << EOF 
+Usage: <synopsis>
+<short_descr>
+
+<options>
+EOF
+			;;
+		'-c'|'--config')
+			print_config
+			;;
+		'-v'|'-V'|'--version')
+			echo "${0##*/} <version>"
+			;;
+		-*)
+			_die "wrong option"
+			;;
+		*)
+			return
+			;;
+	esac
+	exit 0
+}
+
+safe_source() {
+	# perform basic security check before sourcing
+	# $1: config file
+
+	if grep -Evx '([a-z_]+=([[:alnum:]\ _./-]+|"[[:alnum:] _./'\''-]+"|'\''[[:alnum:] _./"-]+'\''))?( *#.*)?' "$1"; then
+		_warn "Config file $1 looks suspicious. It was not evaluated."
+	else
+		source "$1"
+	fi
+}
+
+read_config() {
+	# read config files $user_config and $dir_config and set defaults
+
+	# set default values
+	resize='-scale' # -scale or -resize
+	backend='im' # im or gm
+	auto_or='T' # T or F
+	out_exist_action=overlay # r[eplace], o[verlay], a[bort]
+
+	output=out.png
+	canvas_dim=1000x800
+	canvas_color=none
+	mat_size=0
+	mat_color=black
+	inner_border=0
+	outer_border=0
+	text_settings=''
+	output_script=F
+
+	# read config files
+	safe_source "$user_config"
+	safe_source "$dir_config"
+}
+
+print_config() {
+	for var in "${config_vars[@]}"; do
+		echo "${!var@A}"
+	done
+}
+
+perc2pix() {
+	# convert percentage of width/height/min to pixels
+	# $1: orientation; v = vertical, h = horizontal, b = border: use min(w,h)/2 of canvas dim (because then, 100% means the border covers everything)
+	# $2: percentage
+
+	local orientation="$1"
+	local ratio="$2 / 100"
+
+	if [ "$orientation" = v ]; then
+		bc <<< "${sectdim[w]} * $ratio"
+	elif [ "$orientation" = h ]; then
+		bc <<< "${sectdim[h]} * $ratio"
+	elif [ "$orientation" = b ]; then
+		local min=$((cvdim[w]<cvdim[h]?cvdim[w]:cvdim[h]))
+		bc <<< "$min * $ratio / 2"
+	fi
+}
+
+setcvdim() {
+	# set cvdim, the canvas dimensions
+
+	if [ -f "$output" ]; then
+		cvdim[w]="$(identify -format %w "$output")"
+		cvdim[h]="$(identify -format %h "$output")"
+	else
+		geo="$(sed -r -e 's/\-/+-/g' -e 's/\++/+/g' <<< "$canvas_dim")"
+		regex='s/([0-9]*)x?([0-9]*)\+?(-?[0-9]*)\+?(-?[0-9]*)/'
+		cvdim[w]=$(sed -r -e "$regex""\1/" -e 's/^$/0/' <<< "$geo")
+		cvdim[h]=$(sed -r -e "$regex""\2/" -e 's/^$/0/' <<< "$geo")
+	fi
+	
+	_check_positive "cvdim in setcvdim()" 2 "${cvdim[w]}" "${cvdim[h]}"
+}
+
+setrootsectdim() {
+	# set dimensio of root section (the section containing all output images, inluding the inner border around them)
+	((sectdim[w]=cvdim[w] + 2*border[i] - 2*border[o]))
+	((sectdim[h]=cvdim[h] + 2*border[i] - 2*border[o]))
+	((sectdim[x]=border[o] - border[i]))
+	((sectdim[y]=border[o] - border[i]))
+
+	_check_positive "sectdim in setrootsectdim()" 2 "${sectdim[w]}" "${sectdim[h]}"     "${sectdim[x]}" "${sectdim[y]}"
+}
+
+getoutwh() {
+	# print output width (if v)  or height (if h)
+	# $1: orientation; v = vertical, h = horizontal
+	# $2, ..., $#: the script's unprocessed parameters
+	orientation="$1"
+	shift 1
+	local brkt_lvl=0
+	while (($#)); do
+		case "$1" in
+			'(')
+				((brkt_lvl++))
+				shift 1
+				;;
+			')')
+				if [ "$brkt_lvl" -eq 0 ]; then
+					break 
+				 else
+					 ((brkt_lvl--))
+					 shift 1
+				 fi
+				 ;;
+			*)
+				if [ "$brkt_lvl" -eq 0 ]; then
+					unset OPTION OPTIND OPTARG
+					getopts "h:v:rRs:z:" OPTION
+					if [ "$orientation" = "$OPTION" ]; then
+						perc2pix "$OPTION" "$OPTARG"
+						return
+					else
+						if [ "$OPTION" = v ]; then
+							shift $#
+						fi
+					fi
+
+					if [ "$OPTIND" = 1 ]; then
+						shift 1
+					elif [ "$OPTIND" -gt 1 ]; then
+						shift "$((OPTIND - 1))"
+						OPTIND=1
+					fi
+
+				else # $brkt_lvl > 0
+					shift 1
+				fi
+				;;
+		esac # $1
+	done
+
+	if [ "$orientation" = v ]; then
+		bc <<< "${sectdim[w]} + ${sectdim[x]} - ${outdim[xs]}"
+	elif [ "$orientation" = h ]; then
+		bc <<< "${sectdim[h]} + ${sectdim[y]} - ${outdim[ys]}"
+	fi
+}
+
+setout() {
+	# set outdim, the output dimensions of the current image
+	# $1, ..., $#: the script's unprocessed parameters
+
+	# output dimensions of section
+	outdim[ws]="$(getoutwh v "$@")"
+	outdim[hs]="$(getoutwh h "$@")"
+	# [xs] and [ys] are set in main_loop, directly afrer reading arguments to -v and -h
+
+	# output dimensions of image
+	((outdim[wi]=outdim[ws] - 2 * border[i]))
+	((outdim[hi]=outdim[hs] - 2 * border[i]))
+	((outdim[xi]=outdim[xs] + border[i]))
+	((outdim[yi]=outdim[ys] + border[i]))
+
+	# output dimensions of mat
+	((outdim[xm0]=outdim[xi] - border[m]))
+	((outdim[ym0]=outdim[yi] - border[m]))
+	((outdim[xm1]=outdim[xi] + outdim[wi] + border[m]))
+	((outdim[ym1]=outdim[yi] + outdim[hi] + border[m]))
+	outdim[mat]="${outdim[xm0]},${outdim[ym0]} ${outdim[xm1]},${outdim[ym1]}"
+
+	# center of section for text
+	((outdim[xc]=outdim[xs] + (outdim[ws] - cvdim[w]) / 2))
+	((outdim[yc]=outdim[ys] + (outdim[hs] - cvdim[h]) / 2))
+	outdim[ctr]="${outdim[xc]},${outdim[yc]}"
+
+	_check_positive "outdim in setout()" 4 "${outdim[ws]}" "${outdim[hs]}" "${outdim[wi]}" "${outdim[hi]}"     "${outdim[xs]}" "${outdim[ys]}" "${outdim[xi]}" "${outdim[yi]}"
+}
+
+setin() {
+	# set indim, the input dimensions of the current image (i.e. what to crop)
+	# $1: input image
+
+	if [ "$((rot_total % 180))" = 0 ];then
+		indim[w]="$(identify -format %w "$1")"
+		indim[h]="$(identify -format %h "$1")"
+	else
+		indim[w]="$(identify -format %h "$1")"
+		indim[h]="$(identify -format %w "$1")"
+	fi
+	indim[x]=0
+	indim[y]=0
+
+	w0="${indim[w]}"
+	h0="${indim[h]}"
+	if [ "$(bc <<< "${indim[w]} * ${outdim[hi]} - ${outdim[wi]} * ${indim[h]}")" -gt 0 ]; then
+	# if aspect ratio of indim > that of outdim, then crop from left and right, else crop from top and bottom
+		indim[w]="$(bc <<< "${indim[h]} * ${outdim[wi]} / ${outdim[hi]}")"
+	else
+		indim[h]="$(bc <<< "${indim[w]} * ${outdim[hi]} / ${outdim[wi]}")"
+	fi
+
+	# zoom and shift
+	indim[w]="$(bc <<< "${indim[w]} * $zoom")"
+	indim[h]="$(bc <<< "${indim[h]} * $zoom")"
+	indim[x]=$(bc <<< "($w0 - ${indim[w]}) * $shft_x")
+	indim[y]=$(bc <<< "($h0 - ${indim[h]}) * $shft_y")
+
+	indim[img]="${indim[w]}x${indim[h]}+${indim[x]}+${indim[y]}"
+
+	_check_positive "indim in setin()" 2 "${indim[w]}" "${indim[h]}"     "${indim[x]}" "${indim[y]}"
+}
+
+setmod() {
+	# set rot_total, shft_x, shft_y, zoom
+	# $1, ..., $#: the script's unprocessed parameters; actively used: $1 = current image, $2, ... = +r, -R, -r, -s or -z
+
+	# set rot_exif
+	if [ "$auto_or" = F ]; then
+		rot_exif=0
+	else
+		rot_exif="$(identify -format '%[exif:orientation]' "$1" 2>/dev/null)"
+		rot_exif="$(exif2deg "$rot_exif")"
+	fi
+
+	# set rot_input, shft, zoom
+	rot_input=0
+	shft=50
+	zoom=100
+	shift 1
+
+	# getopts is nested with "get file specific options" in main_loop(), therefore needs backup of variables
+	OPTION_bak="$OPTION"; OPTIND_bak="$OPTIND"; OPTARG_bak="$OPTARG"
+	while :; do
+		unset OPTION OPTIND OPTARG
+		while getopts "rRs:z:v:h:" OPTION; do
+			case "$OPTION" in
+			r)
+				((rot_input-=90))
+				;;
+			R)
+				((rot_input+=180))
+				;;
+			s)
+				shft="$OPTARG"
+				;;
+			z)
+				zoom="$OPTARG"
+				;;
+			*)
+				break
+				;;
+			esac
+			if [ "$OPTIND" -gt 1 ]; then shift "$((OPTIND - 1))"; OPTIND=1; fi
+		done
+
+		if [ "$1" = '+r' ]; then
+			((rot_input+=90))
+			shift
+		else
+			break
+		fi
+	done
+	OPTION="$OPTION_bak"; OPTIND="$OPTIND_bak"; OPTARG="$OPTARG_bak"
+
+	# set rot_total
+	rot_total="$((rot_exif + rot_input))"
+
+	# set shft_x, shft_y
+	if [ "$shft" = "{shift##*x}" ]; then
+		shft_x="$shft"
+		shft_y="$shft"
+	else
+		shft_x="${shft%%x*}"
+		shft_y="${shft##*x}"
+	fi
+	shft_x="$(bc <<< "$shft_x * 0.01")"
+	shft_y="$(bc <<< "$shft_y * 0.01")"
+
+	# set zoom
+	zoom="$(bc <<< "$zoom * 0.01")"
+}
+
+exif2deg() {
+	# exif code to rotation in degrees
+	# $1: exif code
+
+	case "$1" in
+		""|1|2|4) echo 0;;
+		6|7) echo 90;;
+		3) echo 180;;
+		5|8) echo 270;;
+		*) _die "wrong option" ;;
+	esac
+}
+
+init_1() {
+	# set default values, read config files, deal with existing $output
+
+	read_config
+
+	# help, version, print config
+	[ "$#" -le 1 ] && inform "$1"
+
+	if [ "${output##*.}" = png ] && [ "$output_type" = TrueColor ]; then
+		pngformat='png24:'
+	fi
+
+	# Deal with existing $output
+	if [ -e "$output" ]; then
+		! [ -f "$output" ] && _die "Output file $output exists and is not a regular file."
+		case "$out_exist_action" in
+			r|replace)
+				rm "$output"	
+				;;
+			a|abort)
+				_die "Output file $output exists."
+				;;
+			o|overlay)
+				;;
+			*)
+				_die "Value of out_exist_action not admissible."
+				;;
+		esac
+	fi
+}
+
+init_2() {
+	# set variables depending on canvas dimensions
+
+	setcvdim
+
+	border[i]="$(perc2pix b "$inner_border")";
+	border[o]="$(perc2pix b "$outer_border")";
+	border[m]="$(perc2pix b "$mat_size")";
+	
+	setrootsectdim
+	
+	outdim[xs]="${sectdim[x]}"
+	outdim[ys]="${sectdim[y]}"
+
+	printf -- '%s\n' "# create image \"$output\""
+	case "$backend" in
+		im)
+			printf -- '%s\n' "if [ ! -e \"$output\" ]; then convert -size ${cvdim[w]}x${cvdim[h]} -type $output_type xc:$canvas_color \"$pngformat$output\" ; fi"
+			;;
+		gm)
+			printf -- '%s\n' "if [ ! -e \"$output\" ]; then gm convert -size ${cvdim[w]}x${cvdim[h]} xc:$canvas_color \"$output\" ; fi"
+			;;
+		*) _die "Backend $backend not available." ;;
+	esac
+}
+
+main_loop() {
+	# loop through files and file specific parameters
+
+	local brkt_lvl=0
+	while (($#)); do
+		case "$1" in
+			'(') 
+				if [ "$brkt_lvl" -eq 0 ]; then
+					setout "$@"
+					shift
+					printf -- '%s\n' "$(
+						sectdim[w]="${outdim[ws]}"
+						sectdim[h]="${outdim[hs]}"
+						sectdim[x]="${outdim[xs]}"
+						sectdim[y]="${outdim[ys]}"
+						main_loop "$@")"
+				else
+					shift
+				fi
+
+				((brkt_lvl++))
+				;;
+			')') 
+				if [ "$brkt_lvl" -eq 0 ]; then
+					break
+				else
+					((brkt_lvl--))
+					shift 1
+				fi
+				 ;;
+			''|NULL|'+r')
+				shift 1
+				;;
+			*)
+				if [ "$brkt_lvl" -eq 0 ]; then
+		
+					# get file specific options
+					unset OPTION OPTIND OPTARG
+					getopts "v:h:rRs:z:" OPTION
+					case "$OPTION" in
+						v)
+							((outdim[xs]+=$(perc2pix v "$OPTARG")))
+							outdim[ys]="${sectdim[y]}"
+							;;
+						h)
+							((outdim[ys]+=$(perc2pix h "$OPTARG")))
+							;;
+						r|R|s|z)
+							;;
+						?) 
+							if [ -f "$1" ]; then
+								inimg="$1"
+								setmod "$@"
+								setout "$@"
+								setin "$inimg"
+								if [ "${border[m]}" -gt 0 ]; then
+									case "$backend" in
+										im)
+											printf -- '%s\n' "convert \"$output\" -strokewidth 0 -fill \"$mat_color\" -draw \"rectangle ${outdim[mat]}\" -type $output_type \"$pngformat$output\""
+											;;
+										gm)
+											printf -- '%s\n' "gm convert -strokewidth 0 -fill \"$mat_color\" -draw \"rectangle ${outdim[mat]}\" \"$output\" \"$output\""
+											;;
+										*) _die "Backend $backend not available." ;;
+									esac
+								fi # ${border[m]}
+								case "$backend" in
+									im)
+										printf -- '%s\n' "convert \"$output\" \( \"$1\" -rotate $rot_total -crop ${indim[img]} $resize ${outdim[wi]}x \) -geometry +${outdim[xi]}+${outdim[yi]} -compose Over -composite \"$output\""
+										;;
+									gm)
+										printf -- '%s\n' "gm convert \"$1\" -rotate $rot_total -crop ${indim[img]} $resize ${outdim[wi]}x - | gm composite -compose atop -geometry +${outdim[xi]}+${outdim[yi]} - \"$output\" \"$output\""
+										;;
+									*) _die "Backend $backend not available." ;;
+								esac # $backend
+							else # ! -f "$1"
+								# if $1 is not a file, draw string $1
+								intxt="$1"
+								setout "$@"
+								case "$backend" in
+									im)
+										printf -- '%s\n' "convert \"$output\" -gravity center $text_settings -draw \"text ${outdim[ctr]} '$intxt'\" \"$output\""
+										;;
+									gm)
+										printf -- '%s\n' "gm convert -gravity center $text_settings -draw \"text ${outdim[ctr]} '$intxt'\" \"$output\" \"$output\""
+										;;
+									*) _die "Backend $backend not available." ;;
+								esac # $backend
+							fi # $1
+							shift 1
+							;;
+					esac # $OPTION
+					if [ "$OPTIND" -gt 1 ]; then shift "$((OPTIND - 1))"; OPTIND=1; fi
+
+				else # $brkt_lvl > 0
+					shift 1
+				fi # $brkt_lvl
+				;;
+		esac # $1
+	done # $#
+}
+
+main() {
+	dir_config="$PWD/.collage.conf"
+	user_config="$HOME/.config/collage.conf"
+	config_vars=(resize backend auto_or out_exist_action output canvas_dim canvas_color mat_size mat_color inner_border outer_border text_settings output_script)
+	output_type=TrueColor
+	pngformat=''
+
+	declare -A cvdim sectdim indim outdim border
+	# cvdim: canvas dimensions; array set in setcvdim; w=width, h=height
+	# indim: input image's dimensions; array set in setim; w=width, h=height, x=horizontal offset, y=vertical offset
+	# sectdim: dimensions of current section, i.e. area corresponding to current bracket-enclosed expression, incl. border: w=width, h=height, x=horizontal offset, y=vertical offset
+	# outdim: output dimensions of current image (within collage); array set in setout; image dimensions: wi=width, hi=height, xi=horizontal offset, yi=vertical offset; section dimensions (= image incl. border): ws, hs, xs, ys; center dimensions: xc, yc; sect=(ws)x(hs)+(xs)+(ys); mat=xm0,ym0 xm1,ym1; ctr=xc,yc
+	# border: border around images; array set in global getopts, i=inner border (between images), o=outer border (between images and canvas)
+
+	init_1 "$@"
+
+	# get global options
+	unset OPTION OPTIND OPTARG
+	while getopts "b:B:c:C:m:M:o:st:" OPTION; do
+		case "$OPTION" in
+			b) inner_border="$OPTARG";;
+			B) outer_border="$OPTARG";;
+			c) canvas_dim="$OPTARG";;
+			C) canvas_color="$OPTARG";;
+			m) mat_size="$OPTARG";;
+			M) mat_color="$OPTARG";;
+			o) output="$OPTARG";;
+			s) output_script=T;;
+			t) text_settings="$OPTARG";;
+			?) _die "Illegal global option \"$OPTION\".";;
+		esac
+		if [ "$OPTIND" -gt 1 ]; then shift "$((OPTIND - 1))"; OPTIND=1; fi
+	done
+
+	{
+		init_2
+		main_loop "$@"
+	} | {
+		if [ "$output_script" = T ]; then
+			cat
+		else
+			bash
+		fi
+	}
+}
+
+main "$@"

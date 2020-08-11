@@ -1,0 +1,99 @@
+short_descr
+	@u Create collage from images
+
+description
+	Front end to ImageMagick and GraphicsMagick for creating collage of image files and text.
+	
+synopsis
+	**collage** \[G-OPT\] *FILE1* \[F-OPT\] \[A-OPT *FILE2* [F-OPT] ...\]
+	**collage** I-OPT
+
+options
+	@s Global options [G-OPT]:
+	Global options precede all input images.
+	@p **-b** *P*   @t set inner border (between images) to *P*% of min(width,height)
+	@p **-B** *P*   @t set outer border (between images and canvas edge) to *P*% of min(width,height)
+	@p **-c** *W*x*H* @t set canvas width = *W*, canvas height = *H* pixels (if output exists, defaults to output dimensions)
+	@p **-C** *N*   @t set canvas color to color name *N*
+	@p **-m** *X*   @t set mat size to *X* pixels
+	@p **-M** *N*   @t set mat color to color name *N*
+	@p **-o** *F*   @t write output to file *F*
+	@p **-s**       @t print script, instead of producing output image
+	@p **-t** *S*   @t use string *S* as settings for drawing text
+	
+	@s Arrangement options [A-OPT]:
+	Arrangement options are between two input images I and J. You may use brackets, ( and ), to change the order of operation.
+	@p **-v** *X*   @t place image *J* to the right of image *I*, after vertical section of *X*% of min(width,height)
+	@p **-h** *X*   @t place image *J* below image *I*, after horizontal section of *X*% of min(width,height)
+	
+	@s File-specific options [F-OPT]:
+	File-specific options are after the corresponding input image *I*.
+	@p **-r**|**-R**|**+r**  @t rotate image *I* by 90|180|270 degrees
+	@p **-s** *X*   @t If *X*=@*{ A@*} x@*{ B@*} , shift image *I* by *A*% to the right and *B*% to the bottom. (0%=left/top, 50%=center, 100%=right/bottom) If *X* is a number *N*, act as if *X*=@*{ N@*} x100 or *X*=100x@*{ N@*}  (depending on whether input or output aspect ratio is bigger).
+	@p **-z** *X*   @t zoom to *X*% of length/height of input image
+
+	@s Information options [I-OPT]:
+	@p **-h**|**--help** @t print help
+	@p **-v**|**--version** @t print version
+	@p **-c**|**--config** @t print configuration settings
+
+arguments
+	In standard case, *FILE* is an image file recognized by ImageMagick or GraphicsMagick. If *FILE* is not a regular file, the string *FILE* is printed in place of an image. If *FILE* is NULL, the corresponding section remains empty.
+
+files
+	Config settings are evaluated in the following order of precedence:
+	* Global options [G-OPT]
+	* @*{ .collage.conf@*}  (in current working directory)
+	* @*{ ~/.config/collage.conf@*} 
+	* hard-coded defaults
+
+	Config files have a simple "name=value" syntax. The following variables may be specified:
+	* **resize** (= -scale or -resize)
+	* **backend** (= im or gm)
+	* **auto_or** (= T or F, auto-orient images with meta data rotation)
+	* **out_exist_action** (= r[eplace], o[verlay], a[bort])
+	* **output** (corresponds to **-o**)
+	* **canvas_dim** (corresponds to **-c**)
+	* **canvas_color** (corresponds to **-C**)
+	* **mat_size** (corresponds to **-m**)
+	* **mat_color** (corresponds to **-M**)
+	* **inner_border** (corresponds to **-b**)
+	* **outer_border** (corresponds to **-B**)
+	* **text_settings** (corresponds to **-t**)
+	* **output_script** (corresponds to **-s**)
+
+installation
+		curl -LO https://github.com/bashdroid/collage/archive/master.tar.gz
+		tar xzf master.tar.gz
+		cd collage-master
+		make install
+	
+	Depending on your system, you might need to run `make install` as root.
+	
+	If you don't need a manual, you may just download and run **collage** with your preferred tools, e.g.:
+
+		curl -LO https://raw.githubusercontent.com/bashdroid/collage/master/collage
+		chmod u+x collage
+
+rationale
+	The motivation for creating this tool came from dissatisfaction with existing photo book editors. With those tools, it is impossible to export your work as pdf, they produce inaccurate results, create humongous amounts of data, are not automatable and offer only limited functionality on mobile devices.
+
+	This tool is designed such that all numeric arguments are percentages (and not pixels) to allow for intuitive usage and for invariance against rescaling. You may use both ImageMagick and GraphicsMagick as backend, since both of these have their advantages and disadvantages.
+
+examples
+	Create a triptych with 5% spacing between the images:
+
+	    collage -b5 -o triptych.jpg left.jpg -v25 middle.jpg -v50 right.jpg
+
+dependencies
+	* imagemagick or graphicsmagick
+	* bc
+
+security
+	**collage** sources file @*{ .collage.conf@*}  in the current working directory. This is a possible security threat if an attacker has write access to your working directory. To mitigate this risk, a simple security check was implemented in function @**{ safe_source()@**} . If you prefer more (e.g. no sourcing) or less (e.g. no checking) security, you can simply change this function.
+
+seealso
+	convert(1), gm(1)
+
+version
+	0.1

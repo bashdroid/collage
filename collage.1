@@ -1,0 +1,139 @@
+.TH collage 1 "10 Aug 2020" "v0.1" "User commands"
+.SH NAME
+collage \- create collage from images
+.P
+.SH SYNOPSIS
+.nf
+\fBcollage\fR [G\-OPT] \fIFILE1\fR [F\-OPT] [A\-OPT \fIFILE2\fR [F\-OPT] ...]
+\fBcollage\fR I\-OPT
+.P
+.fi
+.SH DESCRIPTION
+Front end to ImageMagick and GraphicsMagick for creating collage of image files and text.
+.P
+.SH OPTIONS
+.SS Global options [G\-OPT]:
+Global options precede all input images.
+.TP
+\fB\-b\fR \fIP\fR   
+set inner border (between images) to \fIP\fR% of min(width,height)
+.TP
+\fB\-B\fR \fIP\fR   
+set outer border (between images and canvas edge) to \fIP\fR% of min(width,height)
+.TP
+\fB\-c\fR \fIW\fIx\fIH\fR 
+set canvas width = \fIW\fR, canvas height = \fIH\fR pixels (if output exists, defaults to output dimensions)
+.TP
+\fB\-C\fR \fIN\fR   
+set canvas color to color name \fIN\fR
+.TP
+\fB\-m\fR \fIX\fR   
+set mat size to \fIX\fR pixels
+.TP
+\fB\-M\fR \fIN\fR   
+set mat color to color name \fIN\fR
+.TP
+\fB\-o\fR \fIF\fR   
+write output to file \fIF\fR
+.TP
+\fB\-s\fR       
+print script, instead of producing output image
+.TP
+\fB\-t\fR \fIS\fR   
+use string \fIS\fR as settings for drawing text
+.P
+
+.SS Arrangement options [A\-OPT]:
+Arrangement options are between two input images I and J. You may use brackets, ( and ), to change the order of operation.
+.TP
+\fB\-v\fR \fIX\fR   
+place image \fIJ\fR to the right of image \fII\fR, after vertical section of \fIX\fR% of min(width,height)
+.TP
+\fB\-h\fR \fIX\fR   
+place image \fIJ\fR below image \fII\fR, after horizontal section of \fIX\fR% of min(width,height)
+.P
+
+.SS File\-specific options [F\-OPT]:
+File\-specific options are after the corresponding input image \fII\fR.
+.TP
+\fB\-r\fR|\fB\-R\fR|\fB+r\fR  
+rotate image \fII\fR by 90|180|270 degrees
+.TP
+\fB\-s\fR \fIX\fR   
+If \fIX\fR=\fIA\fRx\fIB\fR, shift image \fII\fR by \fIA\fR% to the right and \fIB\fR% to the bottom. (0%=left/top, 50%=center, 100%=right/bottom) If \fIX\fR is a number \fIN\fR, act as if \fIX\fR=\fIN\fRx100 or \fIX\fR=100x\fIN\fR (depending on whether input or output aspect ratio is bigger).
+.TP
+\fB\-z\fR \fIX\fR   
+zoom to \fIX\fR% of length/height of input image
+.P
+
+.SS Information options [I\-OPT]:
+.TP
+\fB\-h\fR|\fB\-\-help\fR 
+print help
+.TP
+\fB\-v\fR|\fB\-\-version\fR 
+print version
+.TP
+\fB\-c\fR|\fB\-\-config\fR 
+print configuration settings
+.P
+.SH ARGUMENTS
+In standard case, \fIFILE\fR is an image file recognized by ImageMagick or GraphicsMagick. If \fIFILE\fR is not a regular file, the string \fIFILE\fR is printed in place of an image. If \fIFILE\fR is NULL, the corresponding section remains empty.
+.P
+.SH FILES
+Config settings are evaluated in the following order of precedence:
+.IP \[bu] 3
+Global options [G\-OPT]
+.IP \[bu]
+\fI.collage.conf\fR (in current working directory)
+.IP \[bu]
+\fI~/.config/collage.conf\fR
+.IP \[bu]
+hard\-coded defaults
+.P
+
+Config files have a simple "name=value" syntax. The following variables may be specified:
+.IP \[bu] 3
+\fBresize\fR (= \-scale or \-resize)
+.IP \[bu]
+\fBbackend\fR (= im or gm)
+.IP \[bu]
+\fBauto_or\fR (= T or F, auto\-orient images with meta data rotation)
+.IP \[bu]
+\fBout_exist_action\fR (= r[eplace], o[verlay], a[bort])
+.IP \[bu]
+\fBoutput\fR (corresponds to \fB\-o\fR)
+.IP \[bu]
+\fBcanvas_dim\fR (corresponds to \fB\-c\fR)
+.IP \[bu]
+\fBcanvas_color\fR (corresponds to \fB\-C\fR)
+.IP \[bu]
+\fBmat_size\fR (corresponds to \fB\-m\fR)
+.IP \[bu]
+\fBmat_color\fR (corresponds to \fB\-M\fR)
+.IP \[bu]
+\fBinner_border\fR (corresponds to \fB\-b\fR)
+.IP \[bu]
+\fBouter_border\fR (corresponds to \fB\-B\fR)
+.IP \[bu]
+\fBtext_settings\fR (corresponds to \fB\-t\fR)
+.IP \[bu]
+\fBoutput_script\fR (corresponds to \fB\-s\fR)
+.P
+.SH
+SECURITY
+\fBcollage\fR sources file \fI.collage.conf\fR in the current working directory. This is a possible security threat if an attacker has write access to your working directory. To mitigate this risk, a simple security check was implemented in function \fBsafe_source()\fR. If you prefer more (e.g. no sourcing) or less (e.g. no checking) security, you can simply change this function.
+.P
+.SH EXAMPLES
+Create a triptych with 5% spacing between the images:
+.P
+
+.P
+.RS 6
+collage \-b5 \-o triptych.jpg left.jpg \-v25 middle.jpg \-v50 right.jpg
+.RE
+.SH REPORTING BUGS
+Bugs and suggestions should be reported at: https://github.com/bashdroid/collage/issues
+.SH SEE ALSO
+convert(1), gm(1)
+.P
