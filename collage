@@ -84,11 +84,14 @@ EOF
 safe_source() {
 	# perform basic security check before sourcing
 	# $1: config file
+	config_file="$1"
 
-	if grep -Evx '([a-z_]+=([[:alnum:]\ _./-]+|"[[:alnum:] _./'\''-]+"|'\''[[:alnum:] _./"-]+'\''))?( *#.*)?' "$1"; then
-		_warn "Config file $1 looks suspicious. It was not evaluated."
-	else
-		source "$1"
+	if [ -f "$config_file" ]; then
+		if grep -Evxq '([a-z_]+=([[:alnum:]\ _./-]+|"[[:alnum:] _./'\''-]+"|'\''[[:alnum:] _./"-]+'\''))?( *#.*)?' "$config_file"; then
+			_warn "Config file $config_file looks suspicious. It was not evaluated."
+		else
+			source "$config_file"
+		fi
 	fi
 }
 
@@ -277,8 +280,8 @@ setin() {
 	# zoom and shift
 	indim[w]="$(bc <<< "${indim[w]} * $zoom")"
 	indim[h]="$(bc <<< "${indim[h]} * $zoom")"
-	indim[x]=$(bc <<< "($w0 - ${indim[w]}) * $shft_x")
-	indim[y]=$(bc <<< "($h0 - ${indim[h]}) * $shft_y")
+	indim[x]="$(bc <<< "($w0 - ${indim[w]}) * $shft_x")"
+	indim[y]="$(bc <<< "($h0 - ${indim[h]}) * $shft_y")"
 
 	indim[img]="${indim[w]}x${indim[h]}+${indim[x]}+${indim[y]}"
 
