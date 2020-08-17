@@ -11,20 +11,34 @@ _die() {
 	exit 1
 }
 
-_check_positive() {
-	# check that $3, ..., $# are postive rational numbers and that the first $2 of them are not zero
+is_this_or_die() {
+	local var_name="$1"
+	local var_value="$2"
+	local check="$3"
+	shift 3
 
-	errmsg="$1 is not a positive number"
-	no_nonzero="$2"
-	shift 2
-	[[ $no_nonzero =~ ^[0-9]+$ ]] || _die "_check_positive \$2=$2 wrong format"
-
-	while (("$#")); do
-		[[ -z $1 || ! $1 =~ ^\+?[0-9]*.?[0-9]*$ || ($no_nonzero -gt 0 &&  $1 = 0) ]] &&  _die "$errmsg"
-		((no_nonzero--))
-		shift
-	done
+	case "$check" in
+		element_of) 
+			[[ $loglevel -ge 1 ]] && printf '%s\n' "$@" | grep -q -P ^"$var_value"$ || _die "$var_name=$var_value is not an element of $@."
+			;;
+		percentage)
+			[[ $loglevel -ge 1 ]] && [[ $var_value =~ ^\+?[0-9]{0,2}(\.[0-9]*)?$ ]] || [[ $var_value =~ ^\+?100(.0*)?$ ]] || _die "$var_name=$var_value is not a percentage, i.e. a number between 0 and 100." 
+			;;
+		intxint)
+			[[ $loglevel -ge 1 ]] && [[ $var_value =~ ^[0-9]+x[0-9]+$ ]] || _die "$var_name=$var_value is not of type (integer)x(integer)."
+			;;
+		pos_float)
+			[[ $loglevel -ge 2 ]] && [[ $var_value =~ ^\+?[0-9]*.?[0-9]*$ && ! $var_value =~ ^[0.+]*$ ]] || _die "$var_name=$var_value is not a (strictly) postive number."
+			;;
+		pos_float_0)
+			[[ $loglevel -ge 2 ]] && [[ $var_value =~ ^\+?[0-9]*.?[0-9]*$ && ! $var_value =~ ^[.+]*$  ]] || _die "$var_name=$var_value is not a postive number or zero."
+			;;
+		*)
+			_die "wrong option"
+			;;
+	esac
 }
+
 
 inform() {
 	# print help, version or config values
@@ -83,7 +97,6 @@ EOF
 
 safe_source() {
 	# perform basic security check before sourcing
-	# $1: config file
 	config_file="$1"
 
 	if [ -f "$config_file" ]; then
@@ -103,6 +116,7 @@ read_config() {
 	backend='im' # im or gm
 	auto_or='T' # T or F
 	out_exist_action=overlay # r[eplace], o[verlay], a[bort]
+	loglevel=1 # 0, 1 or 2
 
 	output=out.png
 	canvas_dim=1000x800
@@ -117,6 +131,19 @@ read_config() {
 	# read config files
 	safe_source "$user_config"
 	safe_source "$dir_config"
+}
+
+check_config() {
+	is_this_or_die resize "$resize" element_of -scale -resize
+	is_this_or_die backend "$backend" element_of im gm
+	is_this_or_die auto_or "$auto_or" element_of T F
+	is_this_or_die out_exist_action "$out_exist_action" element_of replace overlay abort r o a
+	is_this_or_die loglevel "$loglevel" element_of 0 1 2
+	is_this_or_die canvas_dim "$canvas_dim" intxint
+	is_this_or_die mat_size "$mat_size" percentage
+	is_this_or_die inner_border "$inner_border" percentage
+	is_this_or_die outer_border "$outer_border" percentage
+	is_this_or_die output_script "$output_script" element_of T F
 }
 
 print_config() {
@@ -156,7 +183,9 @@ setcvdim() {
 		cvdim[h]=$(sed -r -e "$regex""\2/" -e 's/^$/0/' <<< "$geo")
 	fi
 	
-	_check_positive "cvdim in setcvdim()" 2 "${cvdim[w]}" "${cvdim[h]}"
+	# Validation
+	is_this_or_die "In setcvdim(), cvdim[w]" "${cvdim[w]}" pos_float
+	is_this_or_die "In setcvdim(), cvdim[h]" "${cvdim[h]}" pos_float
 }
 
 setrootsectdim() {
@@ -166,7 +195,11 @@ setrootsectdim() {
 	((sectdim[x]=border[o] - border[i]))
 	((sectdim[y]=border[o] - border[i]))
 
-	_check_positive "sectdim in setrootsectdim()" 2 "${sectdim[w]}" "${sectdim[h]}"     "${sectdim[x]}" "${sectdim[y]}"
+	# Validation
+	is_this_or_die "In setrootsectdim(), sectdim[w]" "${sectdim[w]}" pos_float
+	is_this_or_die "In setrootsectdim(), sectdim[h]" "${sectdim[h]}" pos_float
+	is_this_or_die "In setrootsectdim(), sectdim[x]" "${sectdim[x]}" pos_float_0
+	is_this_or_die "In setrootsectdim(), sectdim[y]" "${sectdim[y]}" pos_float_0
 }
 
 getoutwh() {
@@ -195,6 +228,7 @@ getoutwh() {
 					unset OPTION OPTIND OPTARG
 					getopts "h:v:rRs:z:" OPTION
 					if [ "$orientation" = "$OPTION" ]; then
+						is_this_or_die "A-OPT_$OPTION" "$OPTARG" percentage
 						perc2pix "$OPTION" "$OPTARG"
 						return
 					else
@@ -229,8 +263,8 @@ setout() {
 	# $1, ..., $#: the script's unprocessed parameters
 
 	# output dimensions of section
-	outdim[ws]="$(getoutwh v "$@")"
-	outdim[hs]="$(getoutwh h "$@")"
+	outdim[ws]="$(getoutwh v "$@")" || exit 1
+	outdim[hs]="$(getoutwh h "$@")" || exit 1
 	# [xs] and [ys] are set in main_loop, directly afrer reading arguments to -v and -h
 
 	# output dimensions of image
@@ -251,7 +285,16 @@ setout() {
 	((outdim[yc]=outdim[ys] + (outdim[hs] - cvdim[h]) / 2))
 	outdim[ctr]="${outdim[xc]},${outdim[yc]}"
 
-	_check_positive "outdim in setout()" 4 "${outdim[ws]}" "${outdim[hs]}" "${outdim[wi]}" "${outdim[hi]}"     "${outdim[xs]}" "${outdim[ys]}" "${outdim[xi]}" "${outdim[yi]}"
+	# Validation
+	is_this_or_die "In setout(), outdim[ws]" "${outdim[ws]}" pos_float
+	is_this_or_die "In setout(), outdim[hs]" "${outdim[hs]}" pos_float
+	is_this_or_die "In setout(), outdim[xs]" "${outdim[xs]}" pos_float_0
+	is_this_or_die "In setout(), outdim[ys]" "${outdim[ys]}" pos_float_0
+
+	is_this_or_die "In setout(), outdim[wi]" "${outdim[wi]}" pos_float
+	is_this_or_die "In setout(), outdim[hi]" "${outdim[hi]}" pos_float
+	is_this_or_die "In setout(), outdim[xi]" "${outdim[xi]}" pos_float_0
+	is_this_or_die "In setout(), outdim[yi]" "${outdim[yi]}" pos_float_0
 }
 
 setin() {
@@ -285,7 +328,11 @@ setin() {
 
 	indim[img]="${indim[w]}x${indim[h]}+${indim[x]}+${indim[y]}"
 
-	_check_positive "indim in setin()" 2 "${indim[w]}" "${indim[h]}"     "${indim[x]}" "${indim[y]}"
+	# Validation
+	is_this_or_die "In setin(), indim[w]" "${indim[w]}" pos_float
+	is_this_or_die "In setin(), indim[h]" "${indim[h]}" pos_float
+	is_this_or_die "In setin(), indim[x]" "${indim[x]}" pos_float_0
+	is_this_or_die "In setin(), indim[y]" "${indim[y]}" pos_float_0
 }
 
 setmod() {
@@ -340,9 +387,6 @@ setmod() {
 	done
 	OPTION="$OPTION_bak"; OPTIND="$OPTIND_bak"; OPTARG="$OPTARG_bak"
 
-	# set rot_total
-	rot_total="$((rot_exif + rot_input))"
-
 	# set shft_x, shft_y
 	if [ "$shft" = "{shift##*x}" ]; then
 		shft_x="$shft"
@@ -351,6 +395,16 @@ setmod() {
 		shft_x="${shft%%x*}"
 		shft_y="${shft##*x}"
 	fi
+
+	# Validation
+	is_this_or_die shft_x "$shft_x" percentage
+	is_this_or_die shft_y "$shft_y" percentage
+	is_this_or_die zoom "$zoom" percentage
+
+	# set rot_total
+	rot_total="$((rot_exif + rot_input))"
+
+	# rescale shft_x, shft_y
 	shft_x="$(bc <<< "$shft_x * 0.01")"
 	shft_y="$(bc <<< "$shft_y * 0.01")"
 
@@ -438,12 +492,13 @@ main_loop() {
 				if [ "$brkt_lvl" -eq 0 ]; then
 					setout "$@"
 					shift
-					printf -- '%s\n' "$(
+					(
 						sectdim[w]="${outdim[ws]}"
 						sectdim[h]="${outdim[hs]}"
 						sectdim[x]="${outdim[xs]}"
 						sectdim[y]="${outdim[ys]}"
-						main_loop "$@")"
+						main_loop "$@"
+					) || exit 1
 				else
 					shift
 				fi
@@ -469,10 +524,12 @@ main_loop() {
 					getopts "v:h:rRs:z:" OPTION
 					case "$OPTION" in
 						v)
+							is_this_or_die "A-OPT_v" "$OPTARG" percentage
 							((outdim[xs]+=$(perc2pix v "$OPTARG")))
 							outdim[ys]="${sectdim[y]}"
 							;;
 						h)
+							is_this_or_die "A-OPT_h" "$OPTARG" percentage
 							((outdim[ys]+=$(perc2pix h "$OPTARG")))
 							;;
 						r|R|s|z)
@@ -563,6 +620,7 @@ main() {
 		esac
 		if [ "$OPTIND" -gt 1 ]; then shift "$((OPTIND - 1))"; OPTIND=1; fi
 	done
+	check_config
 
 	{
 		init_2
