@@ -15,24 +15,21 @@ is_this_or_die() {
 	local check="$3"
 	shift 3
 
-	case "$check" in
-		element_of) 
-			[[ $loglevel -ge 1 ]] && printf '%s\n' "$@" | grep -q -P ^"$var_value"$ || _die "$var_name=$var_value is not an element of $@."
+	case "$loglevel $check" in
+		[1-9]' element_of') 
+			printf '%s\n' "$@" | grep -q -P ^"$var_value"$ || _die "$var_name=$var_value is not an element of $@."
 			;;
-		percentage)
-			[[ $loglevel -ge 1 ]] && [[ $var_value =~ ^\+?[0-9]{0,2}(\.[0-9]*)?$ ]] || [[ $var_value =~ ^\+?100(.0*)?$ ]] || _die "$var_name=$var_value is not a percentage, i.e. a number between 0 and 100." 
+		[1-9]' percentage')
+			[[ $var_value =~ ^\+?[0-9]{0,2}(\.[0-9]*)?$ ]] || [[ $var_value =~ ^\+?100(.0*)?$ ]] || _die "$var_name=$var_value is not a percentage, i.e. a number between 0 and 100." 
 			;;
-		intxint)
-			[[ $loglevel -ge 1 ]] && [[ $var_value =~ ^[0-9]+x[0-9]+$ ]] || _die "$var_name=$var_value is not of type (integer)x(integer)."
+		[1-9]' intxint')
+			[[ $var_value =~ ^[0-9]+x[0-9]+$ ]] || _die "$var_name=$var_value is not of type (integer)x(integer)."
 			;;
-		pos_float)
-			[[ $loglevel -ge 2 ]] && [[ $var_value =~ ^\+?[0-9]*.?[0-9]*$ && ! $var_value =~ ^[0.+]*$ ]] || _die "$var_name=$var_value is not a (strictly) postive number."
+		[2-9]' pos_float')
+			[[ $var_value =~ ^\+?[0-9]*.?[0-9]*$ && ! $var_value =~ ^[0.+]*$ ]] || _die "$var_name=$var_value is not a (strictly) postive number."
 			;;
-		pos_float_0)
-			[[ $loglevel -ge 2 ]] && [[ $var_value =~ ^\+?[0-9]*.?[0-9]*$ && ! $var_value =~ ^[.+]*$  ]] || _die "$var_name=$var_value is not a postive number or zero."
-			;;
-		*)
-			_die "wrong option"
+		[2-9]' pos_float_0')
+			[[ $var_value =~ ^\+?[0-9]*.?[0-9]*$ && ! $var_value =~ ^[.+]*$  ]] || _die "$var_name=$var_value is not a postive number or zero."
 			;;
 	esac
 }
